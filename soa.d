@@ -17,6 +17,7 @@ import std.range : ElementType;
 struct Vector3 {
 	float x;
 	float y;
+	float z;
 }
 Vector3[100] vectors;
 
