@@ -8,6 +8,7 @@ module soa;
 
 import std.traits : Unqual, isMutable, isArray;
 import std.range : ElementType;
+import std.typetuple : Erase, staticMap, TypeTuple;
 
 /**
  * Reimplements Array-of-Structs $(D A) as a Struct-of-Arrays.
@@ -85,7 +86,7 @@ struct SOA(A : T[N], T, size_t N) if (is(T == struct))
 	private static string getMemberDecls() @property pure
 	{
 		string ret;
-		foreach (name; __traits(allMembers, T))
+		foreach (name; Fields)
 			ret ~= `typeof(U.`~name~`)[N] `~name~` = initValues.`~name~`;`;
 		return ret;
 	}
@@ -121,7 +122,7 @@ struct SOA(A : T[], T) if (is(T == struct))
 	private static string getMemberDecls() @property pure
 	{
 		string ret;
-		foreach (name; __traits(allMembers, T))
+		foreach (name; Fields)
 			ret ~= `typeof(U.`~name~`)[] `~name~`;`;
 		return ret;
 	}
@@ -132,15 +133,16 @@ struct SOA(A : T[], T) if (is(T == struct))
 	/// Array lengths
 	auto length() @property const
 	{
-		//TODO
-		return __traits(getMember, this, "x").length;
+		// We expect all arrays to have the same length
+		static enum FirstMember = Fields[0];
+		return __traits(getMember, this, FirstMember).length;
 	}
 
 	///
 	void length(size_t newLen) @property
 	{
 		auto oldLen = length;
-		foreach (Name; __traits(allMembers, T))
+		foreach (Name; Fields)
 		{
 			__traits(getMember, this, Name).length = newLen;
 			if (oldLen < newLen)
@@ -228,7 +230,27 @@ unittest {
 	assert(fv[3] == 20.0);  // y1
 	assert(fv[4] == 3.0);   // z0
 	assert(fv[5] == 30.0);  // z1
+
+
+	// Will it explode if the struct has non-field members?
+	struct Person
+	{
+		int age;
+		string name;
+
+		void sayMyName()
+		{
+			import std.stdio;
+			writeln(name);
+		}
+
+		bool x;
+		bool y() @property const { return false; }
+	}
+	SOA!(Person[3]) people;
+	//pragma(msg, typeof(people).Fields);  // should be 'age', 'name', 'x'
 }
+
 
 // Dynamic length SOA tests
 unittest {
@@ -295,6 +317,7 @@ unittest {
 		b[0] = Vector3(3.0,4,5);
 		assert(b[0] == Vector3(3.0,4,5));
 	}
+
 }
 
 
@@ -302,6 +325,20 @@ unittest {
 private mixin template CommonImpl()
 {
 	alias U = Unqual!T;
+
+	// T may have methods and non-field members, preventing the use of the
+	//  allMembers trait.  We work around this by getting the names of the fields
+	//  by using tupleof.
+	template Iota(size_t I, size_t Len) {
+		static if (I < Len)
+			alias Iota = TypeTuple!(I, Iota!(I + 1, Len));
+		else
+			alias Iota = TypeTuple!();
+	}
+	static enum GetFieldName(size_t I) = T.tupleof[I].stringof;
+
+	// The names of the fields in order
+	static enum Fields = Erase!("this", staticMap!(GetFieldName, Iota!(0, T.tupleof.length)));
 
 	// This is required to initialize the arrays to corresponding init values from
 	//  the user's T definition
@@ -334,7 +371,7 @@ private mixin template CommonImpl()
 			// Check equality with other instances of this Dispatch type
 			bool opEquals()(auto ref const typeof(this) v) const
 			{
-				foreach (Name; __traits(allMembers, T))
+				foreach (Name; Fields)
 					if (__traits(getMember, v, Name) != opDispatch!Name) return false;
 				return true;
 			}
@@ -343,7 +380,7 @@ private mixin template CommonImpl()
 			bool opEquals()(auto ref const U v) const
 			{
 				// statically unrolled
-				foreach (Name; __traits(allMembers, T))
+				foreach (Name; Fields)
 					if (__traits(getMember, v, Name) != opDispatch!Name) return false;
 				return true;
 			}
@@ -353,7 +390,7 @@ private mixin template CommonImpl()
 			void opAssign(T v)
 			{
 				// statically unrolled
-				foreach (Name; __traits(allMembers, T))
+				foreach (Name; Fields)
 					opDispatch!Name(__traits(getMember, v, Name));
 			}
 
@@ -361,7 +398,7 @@ private mixin template CommonImpl()
 			T opCast(T)()
 			{
 				U ret;
-				foreach (Name; __traits(allMembers, U))
+				foreach (Name; Fields)
 					__traits(getMember, ret, Name) = opDispatch!Name;
 				return cast(T)ret;
 			}
