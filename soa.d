@@ -26,6 +26,7 @@ Vector3[100] vectors;
 struct Vector3_SOA {
 	float[100] x;
 	float[100] y;
+	float[100] z;
 }
 Vector3_SOA vectors2;
 ----
